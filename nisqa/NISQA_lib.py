@@ -17,12 +17,16 @@ from scipy.stats import pearsonr
 from scipy.optimize import minimize
 
 import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
+import torchaudio
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torchaudio.transforms import MelSpectrogram
+from torchaudio.functional import amplitude_to_DB
 
 
 #%% Models
@@ -1431,7 +1435,7 @@ def predict_mos(model, ds, bs, dev, num_workers=0):
     model.to(dev)
     model.eval()
     with torch.no_grad():
-        y_hat_list = [ [model(xb.to(dev), n_wins.to(dev)).cpu().numpy(), yb.cpu().numpy()] for xb, yb, (idx, n_wins) in dl]
+        y_hat_list = [ [model(xb.to(dev), n_wins.to(dev)).cpu().numpy(), yb.cpu().numpy()] for xb, yb, (idx, n_wins) in tqdm(dl)]
     yy = np.concatenate( y_hat_list, axis=1 )
     y_hat = yy[0,:,0].reshape(-1,1)
     y = yy[1,:,0].reshape(-1,1)
@@ -2134,7 +2138,7 @@ class SpeechQualityDataset(Dataset):
             if self.double_ended:
                 file_path_ref = os.path.join(self.data_dir, self.df[self.filename_column_ref].iloc[index])
        
-            spec = get_librosa_melspec(
+            spec = get_torch_melspec(
                 file_path,
                 sr = self.ms_sr,
                 n_fft=self.ms_n_fft,
@@ -2331,4 +2335,42 @@ def get_librosa_melspec(
     return spec
 
 
+TORCH_MEL_SPECS = {}
+
+def create_mel_spec(sample_rate: int = 24000):
+    return MelSpectrogram(
+        sample_rate=sample_rate,
+        n_fft=4096,
+        win_length=int(sample_rate * 0.02),
+        hop_length=int(sample_rate * 0.01),
+        f_max=20000,
+        n_mels=48,
+        power=2.0,
+        norm='slaney',
+        mel_scale='slaney'
+    )
+
+
+def get_torch_melspec(
+    file_path: str,
+    sr: str = 24000,
+    multiplier: float = 10.0,
+    db_multiplier: float = 1.0,
+    a_min: float = 1e-6,
+    top_db: float = 80.0,
+    torch_to_librosa_bias: float = 1.5
+):
+    signal, sr = torchaudio.load(file_path, normalize=True)
+    
+    if sr not in TORCH_MEL_SPECS:
+        TORCH_MEL_SPECS[sr] = create_mel_spec(sample_rate=sr)
+
+    spec = amplitude_to_DB(
+        x=TORCH_MEL_SPECS[sr](signal[0]),
+        multiplier=multiplier,
+        db_multiplier=db_multiplier,
+        amin=a_min,
+        top_db=top_db
+    )
+    return spec + torch_to_librosa_bias
 

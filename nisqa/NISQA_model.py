@@ -52,6 +52,9 @@ class nisqaModel(object):
             self._evaluate_mos(mapping=mapping, do_print=do_print, do_plot=do_plot)      
             
     def predict(self):
+        if self.args['output_dir'] and Path(os.path.join(self.args['output_dir'], 'NISQA_results.csv')).exists():
+            return
+
         print('---> Predicting ...')
         if self.args['tr_parallel']:
             self.model = nn.DataParallel(self.model)           
@@ -77,7 +80,7 @@ class nisqaModel(object):
                 os.path.join(self.args['output_dir'], 'NISQA_results.csv'), 
                 index=False)
             
-        print(self.ds_val.df.to_string(index=False))
+        # print(self.ds_val.df.to_string(index=False))
         return self.ds_val.df
 
     def _train_mos(self):
